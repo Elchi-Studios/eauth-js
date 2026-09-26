@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test"],
+  // The fixture is a Nuxt application, typed by the files Nuxt generates.
+  "exclude": ["test/fixture"]
+}
