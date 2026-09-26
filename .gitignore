@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tgz
+*.tsbuildinfo
+.DS_Store
+
+# What the Nuxt fixture leaves behind when the tests build it.
+packages/nuxt/test/fixture/.nuxt/
+packages/nuxt/test/fixture/.output/
+packages/nuxt/test/fixture/node_modules/

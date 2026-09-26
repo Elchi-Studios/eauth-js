@@ -1,0 +1,15 @@
+{
+  "name": "eauth-js",
+  "private": true,
+  "description": "JavaScript SDKs for EAuth, the sign-in service of Elchi Studios.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
+  }
+}
