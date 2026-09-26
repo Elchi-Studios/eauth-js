@@ -1,0 +1,61 @@
+{
+  "name": "@elchi-studios/eauth-sveltekit",
+  "version": "1.0.0",
+  "description": "EAuth for Svelte 4 and 5 and SvelteKit: an auth store that is safe during server rendering.",
+  "keywords": [
+    "eauth",
+    "svelte",
+    "sveltekit",
+    "oauth2",
+    "openid-connect",
+    "oidc",
+    "pkce",
+    "authentication"
+  ],
+  "license": "MIT",
+  "author": "Elchi Studios (https://elchi.dev)",
+  "homepage": "https://docs.elchi.dev/sdk",
+  "bugs": "https://github.com/Elchi-Studios/eauth-js/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Elchi-Studios/eauth-js.git",
+    "directory": "packages/sveltekit"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "@elchi-studios/eauth": "^1.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^4.2.0 || ^5.0.0"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-reporter=spec test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "svelte": "^5.57.1"
+  }
+}
