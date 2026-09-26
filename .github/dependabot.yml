@@ -20,3 +20,11 @@ updates:
         dependency-type: development
     ignore:
       - dependency-name: "@elchi-studios/*"
+      # The Node types follow the oldest Node in engines, so nothing a newer
+      # Node has slips into the scripts and tests.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # A TypeScript major changes the declarations the packages ship. It is
+      # taken on purpose, with a release, not as a weekly update.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
