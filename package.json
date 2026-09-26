@@ -4,7 +4,15 @@
   "description": "JavaScript SDKs for EAuth, the sign-in service of Elchi Studios.",
   "license": "MIT",
   "type": "module",
-  "workspaces": [],
+  "workspaces": [
+    "packages/eauth"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces",
+    "check": "npm run build && npm run typecheck && npm test"
+  },
   "engines": {
     "node": ">=22.18"
   },
