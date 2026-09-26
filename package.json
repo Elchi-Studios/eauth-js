@@ -14,14 +14,16 @@
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces && tsc -p tsconfig.json --noEmit",
     "test": "npm run test --workspaces && node --test --test-reporter=spec test/*.test.ts",
-    "check": "npm run build && npm run typecheck && npm test"
+    "check": "npm run build && npm run typecheck && npm test && node scripts/check-packages.mjs"
   },
   "engines": {
     "node": ">=22.18"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^22.20.4",
     "playwright-core": "^1.63.0",
+    "publint": "^0.3.24",
     "typescript": "^5.9.3"
   }
 }
