@@ -1,0 +1,38 @@
+name: Lockfile
+
+# Resolves package-lock.json afresh from package.json, runs every check
+# with it, and commits it when it changed. For a fresh start of the
+# lockfile; day to day, Dependabot keeps it current.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lock:
+    name: Resolve, check and commit the lockfile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm install --package-lock-only --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run check
+      - name: Commit the lockfile
+        run: |
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "The lockfile is current."
+            exit 0
+          fi
+          git -c user.name=Elchi -c user.email=github@elchi.dev \
+            commit -m "build: the lockfile, resolved and checked in CI"
+          git push
