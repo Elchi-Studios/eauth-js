@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<!--
+  EAuth without a framework and without a build step.
+
+  Serve this file from a local web server, not from the file system: a
+  redirect URI has to be http or https, and the Web Crypto API only exists
+  on https or localhost.
+
+      python3 -m http.server 3000
+
+  Then create a public application at panel.elchi.dev, register
+  http://localhost:3000/vanilla.html as a redirect URI, put its client ID
+  below, and open that address.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EAuth, plain JavaScript</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1.5rem; }
+  button { font: inherit; padding: .6rem 1.2rem; cursor: pointer; }
+  pre { background: #f1f2f4; padding: 1rem; overflow-x: auto; font-size: .85rem; }
+  .error { border-left: 2px solid #f26b1d; padding-left: 1rem; }
+</style>
+</head>
+<body>
+<h1>EAuth</h1>
+<main id="app"><p>One moment</p></main>
+
+<script type="module">
+import { EAuth, EAuthError } from "https://cdn.jsdelivr.net/npm/@elchi-studios/eauth@1/dist/index.js";
+
+const auth = new EAuth({
+  clientId: "eauth_pub_REPLACE_ME",
+  redirectUri: location.origin + location.pathname,
+});
+
+const app = document.getElementById("app");
+
+// Builds elements with textContent, never innerHTML: the name and the
+// address come from the person, and markup in them must stay text.
+function el(tag, text, attributes = {}) {
+  const node = Object.assign(document.createElement(tag), attributes);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function render() {
+  const user = auth.getUser();
+  if (!user) {
+    const button = el("button", "Sign in with EAuth", { onclick: () => auth.signIn() });
+    app.replaceChildren(el("p", "Nobody is signed in."), button);
+    return;
+  }
+  const hello = el("p", "Signed in as ");
+  hello.append(el("strong", user.name ?? user.email ?? user.sub));
+  const claims = el("pre", JSON.stringify(user.claims, null, 2));
+  const out = el("button", "Sign out", {
+    onclick: async () => {
+      await auth.signOut();
+      render();
+    },
+  });
+  app.replaceChildren(hello, claims, out);
+}
+
+try {
+  // On every page load: completes a sign-in when EAuth has just sent the
+  // browser back, and otherwise continues the session. returnTo is where
+  // the sign-in started; this page has only one place to be.
+  const { returnTo } = await auth.ready();
+  if (returnTo) history.replaceState(null, "", returnTo);
+  render();
+} catch (err) {
+  const detail = err instanceof EAuthError ? `${err.code}: ${err.message}` : String(err);
+  app.replaceChildren(el("p", detail, { className: "error" }), el("button", "Try again", { onclick: () => auth.signIn() }));
+}
+</script>
+</body>
+</html>

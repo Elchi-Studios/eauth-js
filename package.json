@@ -12,8 +12,8 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces && tsc -p tsconfig.json --noEmit",
+    "test": "npm run test --workspaces && node --test --test-reporter=spec test/*.test.ts",
     "check": "npm run build && npm run typecheck && npm test"
   },
   "engines": {
