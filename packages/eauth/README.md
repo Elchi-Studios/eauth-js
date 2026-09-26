@@ -133,6 +133,37 @@ their next renewal, and is not undone by a renewal already under way. The
 token is stored with whose it is, so a tab never presents the token of an
 account another tab has signed in to.
 
+## Organisations
+
+For applications with [organisations](https://docs.elchi.dev/organisations)
+turned on. A sign-in for one of them carries it on the user:
+
+```js
+const { user } = await auth.ready();
+user?.organization; // { id, slug, name, role, permissions } or undefined
+```
+
+Without being told, EAuth takes the person's only organisation or asks
+which one. To sign in for a particular one, or to switch, name it by its ID
+or its slug (an empty string names none):
+
+```js
+await auth.signIn({ organization: "acme-ag" });
+```
+
+A person who is not a member comes back with `access_denied`. An answer for
+another organisation than the one named is refused with
+`organization_mismatch`, and a renewal that changes the organisation ends
+the session. Key your data on `organization.id`; the slug can change. Your
+API checks the same claims in the access token (`org_id`, `org_role`,
+`org_permissions`).
+
+Two tabs can be in two organisations. With memory storage each tab
+remembers its own, and a reload continues in it; when the person may no
+longer enter it, the reload ends signed out. With `storage: "local"` the
+origin keeps one refresh token, so a tab whose organisation is not the
+stored token's signs itself out instead of presenting it.
+
 ## Answers that are not for this tab
 
 An answer from EAuth that does not belong to a sign-in started in this tab
@@ -159,10 +190,10 @@ on as if it had not been there. Only the redirect URI is looked at, so a
 | Method | |
 |---|---|
 | `ready()` | Completes or continues the session on a page load; resolves to `{ user, returnTo }`. Runs once per instance; later calls share the result. |
-| `getUser()` | The signed-in user or `null`: `sub`, `name`, `email`, `emailVerified`, `orgId` and every claim in `claims`. |
+| `getUser()` | The signed-in user or `null`: `sub`, `name`, `email`, `emailVerified`, `organization` and every claim in `claims`. |
 | `isAuthenticated()` | Whether somebody is signed in. |
 | `getAccessToken()` | A valid access token, or `null`. Starts `ready()` if nothing has, which may be the silent redirect of a restore, and waits for it. |
-| `signIn(options)` | Navigates to EAuth. Options: `prompt` (`"login"`, `"none"`, `"consent"`), `loginHint`, `maxAge` in seconds, `returnTo`, `replace`. |
+| `signIn(options)` | Navigates to EAuth. Options: `prompt` (`"login"`, `"none"`, `"consent"`), `loginHint`, `maxAge` in seconds, `organization`, `returnTo`, `replace`. |
 | `signOut(options)` | Options: `local` to skip the revocation, `endSession` to sign out at EAuth too. |
 | `fetch(input, init)` | `fetch` with the access token attached, keeping a `Request`'s own headers. |
 | `fetchUserInfo()` | The claims of the userinfo endpoint, fetched now. |
@@ -191,6 +222,7 @@ sign-in was started from.
 | `audience_mismatch` | The ID token was issued for another application. |
 | `nonce_mismatch` | The ID token belongs to another sign-in. |
 | `subject_mismatch` | A renewed ID token names somebody else. The session ends. |
+| `organization_mismatch` | The ID token is for another organisation than the one named at sign-in, or a renewed one changes the organisation. A renewal ends the session. |
 | `stale_authentication` | With `maxAge` or `prompt: "login"`: the sign-in is older than asked for. |
 | `invalid_token` | The ID token is malformed, or lacks `sub` or `exp`. |
 | `token_expired` | The ID token has expired; usually the device clock is wrong. |

@@ -678,6 +678,148 @@ test("a refreshed ID token must name the same person", async () => {
   assert.ok(b.server.revoked.includes("refresh-2"));
 });
 
+// --- organisations ---------------------------------------------------------------
+
+const ACME_ID = "0199b2c4-5e6f-7a80-9b1c-2d3e4f506172";
+const acme = {
+  org_id: ACME_ID, org_slug: "acme", org_name: "Acme AG",
+  org_role: "admin", org_permissions: ["invoices:read", 7, "invoices:pay"],
+};
+
+test("an organisation is asked for by id or slug, checked, and on the user", async () => {
+  const b = browser();
+  // Every form EAuth reads an ID in, and a slug in capitals.
+  const hex = ACME_ID.replace(/-/g, "");
+  for (const ref of ["acme", "ACME", ACME_ID, ACME_ID.toUpperCase(), `{${ACME_ID}}`, `urn:uuid:${ACME_ID}`, hex, ` acme `]) {
+    const auth = new EAuth(config);
+    await auth.signIn({ organization: ref });
+    assert.equal(b.navigations.at(-1)!.searchParams.get("organization"), ref.trim());
+    b.answer({ code: issueCode(b, acme) });
+    const result = await auth.handleRedirect();
+    assert.deepEqual(result?.user?.organization, {
+      id: ACME_ID, slug: "acme", name: "Acme AG", role: "admin",
+      permissions: ["invoices:read", "invoices:pay"],
+    }, ref);
+  }
+
+  // An empty one asks for none, and checks nothing.
+  for (const ref of ["", "  "]) {
+    const auth = new EAuth(config);
+    await auth.signIn({ organization: ref });
+    assert.equal(b.navigations.at(-1)!.searchParams.get("organization"), null);
+    b.answer({ code: issueCode(b, acme) });
+    assert.equal((await auth.handleRedirect())?.user?.organization?.id, ACME_ID);
+  }
+
+  // A slug that reads like another organisation's ID is not taken for it.
+  const lookalike = new EAuth(config);
+  await lookalike.signIn({ organization: ACME_ID.replace(/.$/, "0") });
+  b.answer({ code: issueCode(b, acme) });
+  await rejects(lookalike.handleRedirect(), "organization_mismatch");
+
+  // An answer for another organisation than the one asked for is refused.
+  const other = new EAuth(config);
+  await other.signIn({ organization: "globex" });
+  b.answer({ code: issueCode(b, acme) });
+  await rejects(other.handleRedirect(), "organization_mismatch");
+  assert.equal(other.getUser(), null);
+
+  // Without organisations there is none, and nothing is asked for.
+  const { b: plain, user } = await signedIn();
+  assert.equal(user?.organization, undefined);
+  assert.equal(plain.navigations.at(-1)!.searchParams.get("organization"), null);
+});
+
+test("a refresh continues in the organisation, and one for another ends the session", async () => {
+  const b = browser();
+  const auth = new EAuth(config);
+  await auth.signIn();
+  b.answer({ code: issueCode(b, acme) });
+  await auth.handleRedirect();
+
+  // The role as it is now.
+  b.server.refreshClaims = { ...acme, org_role: "member", org_permissions: [] };
+  due(auth);
+  assert.equal(await auth.getAccessToken(), "access-2");
+  assert.deepEqual(auth.getUser()?.organization?.role, "member");
+
+  // Another organisation, or none, is not this session.
+  for (const claims of [{ ...acme, org_id: "0199b2c4-5e6f-7a80-9b1c-2d3e4f506173" }, {}]) {
+    const again = new EAuth(config);
+    await again.signIn();
+    b.answer({ code: issueCode(b, acme) });
+    await again.handleRedirect();
+    b.server.refreshClaims = claims;
+    due(again);
+    assert.equal(await again.getAccessToken(), null);
+    assert.equal(again.getUser(), null);
+  }
+});
+
+test("a reload continues in the organisation this tab was in", async () => {
+  const b = browser();
+  const auth = new EAuth(config);
+  await auth.signIn({ organization: "acme" });
+  b.answer({ code: issueCode(b, acme) });
+  await auth.handleRedirect();
+
+  // Not the one EAuth would take, used last perhaps in another tab.
+  b.open(`${APP}/invoices`);
+  void new EAuth(config).restore();
+  await tick();
+  assert.equal(b.navigations.at(-1)!.searchParams.get("organization"), ACME_ID);
+  b.answer({ code: issueCode(b, acme) });
+  assert.equal((await new EAuth(config).ready()).user?.organization?.id, ACME_ID);
+
+  // No longer allowed in: signed out quietly, and the next sign-in chooses.
+  b.open(`${APP}/invoices`);
+  void new EAuth(config).restore();
+  await tick();
+  b.answer({ error: "access_denied" });
+  assert.deepEqual(await new EAuth(config).ready(), { user: null, returnTo: "/invoices" });
+  assert.equal(b.session.getItem("eauth:organization"), null);
+  await new EAuth(config).signIn();
+  assert.equal(b.navigations.at(-1)!.searchParams.get("organization"), null);
+
+  // An access_denied the application asked for, silently, is its to see.
+  const asked = new EAuth(config);
+  await asked.signIn({ prompt: "none", organization: "acme" });
+  b.answer({ error: "access_denied" });
+  await rejects(asked.handleRedirect(), "access_denied");
+
+  // A tab without an organisation asks for none.
+  const { b: plain } = await signedIn();
+  plain.open(`${APP}/invoices`);
+  void new EAuth(config).restore();
+  await tick();
+  assert.equal(plain.navigations.at(-1)!.searchParams.get("organization"), null);
+});
+
+test("local storage: a tab never presents the token of another organisation", async () => {
+  const b = browser();
+  const tabB = new EAuth({ ...config, storage: "local" });
+  await tabB.signIn({ organization: "acme" });
+  b.answer({ code: issueCode(b, acme) });
+  await tabB.handleRedirect();
+  assert.equal(JSON.parse(b.local.getItem("eauth:refresh")!).org, ACME_ID);
+
+  // Tab A, the same person, signs in to another organisation.
+  const globex = { ...acme, org_id: "0199b2c4-5e6f-7a80-9b1c-2d3e4f506173", org_slug: "globex" };
+  const tabA = new EAuth({ ...config, storage: "local" });
+  await tabA.signIn({ organization: "globex" });
+  b.answer({ code: issueCode(b, globex) });
+  await tabA.handleRedirect();
+  const held = stored(b);
+
+  due(tabB);
+  assert.equal(await tabB.getAccessToken(), null);
+  assert.equal(tabB.isAuthenticated(), false);
+  assert.equal(grants(b, "refresh_token").length, 0, "tab B presented nothing");
+  assert.equal(stored(b), held, "tab A's token is untouched");
+  assert.equal(b.server.revoked.length, 0, "nothing was revoked");
+  assert.equal(tabA.getUser()?.organization?.slug, "globex");
+});
+
 test("without a refresh token the session ends with the access token, and a reload can continue it", async () => {
   const changes: (EAuthUser | null)[] = [];
   const b = browser();

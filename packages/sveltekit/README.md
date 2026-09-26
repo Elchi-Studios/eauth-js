@@ -113,7 +113,7 @@ API, called with the access token.
 
 | Field | |
 |---|---|
-| `user` | The signed-in user or `null`: `sub`, `name`, `email`, `emailVerified`, `orgId`, `claims`. |
+| `user` | The signed-in user or `null`: `sub`, `name`, `email`, `emailVerified`, `organization`, `claims`. |
 | `loading` | `true` until the page load's sign-in or restore has finished. Stays `true` during server rendering. |
 | `error` | An `EAuthError` from the last sign-in, or `null`. `error.code` says what happened. |
 
@@ -121,7 +121,7 @@ and `auth` has:
 
 | Method | |
 |---|---|
-| `signIn(options)` | Goes to EAuth. Options: `prompt`, `loginHint`, `maxAge`, `returnTo`, `replace`. |
+| `signIn(options)` | Goes to EAuth. Options: `prompt`, `loginHint`, `maxAge`, `organization`, `returnTo`, `replace`. |
 | `signOut(options)` | `{ endSession: true }` signs out at EAuth too. |
 | `getAccessToken()` | A valid access token, or `null`; `null` on the server. |
 | `fetch(input, init)` | `fetch` with the access token attached. |

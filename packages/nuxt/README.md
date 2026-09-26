@@ -136,10 +136,10 @@ fetched in the browser with the access token.
 
 | Field | |
 |---|---|
-| `user` | Ref: the signed-in user or `null` (`sub`, `name`, `email`, `emailVerified`, `orgId`, `claims`). |
+| `user` | Ref: the signed-in user or `null` (`sub`, `name`, `email`, `emailVerified`, `organization`, `claims`). |
 | `loading` | Ref: `true` until the page load's sign-in or restore has finished. |
 | `error` | Ref: an `EAuthError` from the last sign-in, or `null`. `error.code` says what happened. |
-| `signIn(options)` | Goes to EAuth. Options: `prompt`, `loginHint`, `maxAge`, `returnTo` (a path as the browser sees it), `replace`. |
+| `signIn(options)` | Goes to EAuth. Options: `prompt`, `loginHint`, `maxAge`, `organization`, `returnTo` (a path as the browser sees it), `replace`. |
 | `signOut(options)` | `{ endSession: true }` signs out at EAuth too. |
 | `getAccessToken()` | A valid access token, or `null`; `null` on the server. |
 | `fetch(input, init)` | `fetch` with the access token attached. |

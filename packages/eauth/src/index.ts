@@ -72,10 +72,26 @@ export interface EAuthUser {
   name?: string;
   email?: string;
   emailVerified?: boolean;
-  /** Organisation the session acts in, for applications that use them. */
-  orgId?: string;
+  /**
+   * The organisation the person signed in for, for applications that use
+   * organisations; absent otherwise.
+   */
+  organization?: EAuthOrganization;
   /** Every claim of the ID token, for anything not mapped above. */
   claims: Record<string, unknown>;
+}
+
+/** An organisation a person signed in for, from the org_* claims. */
+export interface EAuthOrganization {
+  /** The organisation's ID. Use this as your key; it never changes. */
+  id: string;
+  /** Its slug, which an admin can change. */
+  slug: string;
+  name: string;
+  /** The key of the person's role there. */
+  role: string;
+  /** That role's permissions, as your application named them. */
+  permissions: string[];
 }
 
 export interface EAuthTokens {
@@ -113,6 +129,13 @@ export interface SignInOptions {
   loginHint?: string;
   /** Requires a sign-in no older than this many seconds. */
   maxAge?: number;
+  /**
+   * The organisation to sign in for, by its ID or its slug, for
+   * applications that use organisations. Without it, or empty, EAuth takes
+   * the person's only organisation, or asks which one. A person who is not
+   * a member is refused with access_denied.
+   */
+  organization?: string;
   /**
    * Where your application should go after the sign-in completes, returned
    * by ready() as returnTo. A path on your own origin; anything else is
@@ -163,6 +186,10 @@ interface Pending {
   tries?: number;
   maxAge?: number;
   login?: boolean;
+  /** The organisation asked for, by ID or slug. */
+  org?: string;
+  /** Started by restore, to continue this tab's session after a reload. */
+  resume?: boolean;
 }
 
 interface Expectations {
@@ -172,6 +199,10 @@ interface Expectations {
   maxAge?: number;
   /** For prompt=login: the sign-in must have happened after this, in milliseconds. */
   authAfter?: number;
+  /** The organisation asked for, by ID or slug. */
+  org?: string;
+  /** For a refresh: the organisation's ID the session is in, null for none. */
+  orgId?: string | null;
 }
 
 /** Every failure is an EAuthError with a code to branch on. */
@@ -201,6 +232,11 @@ const REFRESH_KEY = "eauth:refresh";
 const HINT_KEY = "eauth:signed-in";
 /** When the last sign-ins in this tab failed, to stop a redirect loop. */
 const FAILURES_KEY = "eauth:failures";
+/**
+ * The organisation this tab is signed in to, by ID, so a reload continues in
+ * it. Per tab: two tabs can be in two organisations.
+ */
+const ORG_KEY = "eauth:organization";
 
 /** Refresh this long before expiry at most, so a request in flight never carries a token that dies mid-call. */
 const REFRESH_MARGIN_MS = 60_000;
@@ -287,10 +323,12 @@ function storageSet(store: "local" | "session", key: string, value: string | nul
   }
 }
 
-/** The refresh token kept with storage "local", and whose it is. */
+/** The refresh token kept with storage "local", whose it is, and for which organisation. */
 interface Stored {
   token: string;
   sub?: string;
+  /** The organisation's ID, null for none; undefined when stored by an earlier version. */
+  org?: string | null;
 }
 
 function readStored(): Stored | null {
@@ -299,12 +337,41 @@ function readStored(): Stored | null {
   try {
     const value = JSON.parse(raw) as Partial<Stored> | null;
     if (value && typeof value.token === "string" && value.token !== "") {
-      return { token: value.token, sub: typeof value.sub === "string" ? value.sub : undefined };
+      return {
+        token: value.token,
+        sub: typeof value.sub === "string" ? value.sub : undefined,
+        org: typeof value.org === "string" || value.org === null ? value.org : undefined,
+      };
     }
   } catch {
     // Not written by this package.
   }
   return null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * An organisation reference as the ID the tokens carry, or undefined when it
+ * is a slug. EAuth reads an ID in any of the usual forms: with hyphens, in
+ * braces, as a URN, or as 32 hex digits, in either case.
+ */
+function organisationID(ref: string): string | undefined {
+  let s = ref;
+  if (s.length === 45 && s.startsWith("urn:uuid:")) s = s.slice(9);
+  else if (s.length === 38 && s.startsWith("{") && s.endsWith("}")) s = s.slice(1, -1);
+  s = s.toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(s)) {
+    s = `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+  }
+  return UUID.test(s) ? s : undefined;
+}
+
+/** Whether an ID token is for the organisation a sign-in asked for, by ID or slug. */
+function isOrganisation(claims: Record<string, unknown>, ref: string): boolean {
+  const id = organisationID(ref);
+  if (id !== undefined) return typeof claims.org_id === "string" && claims.org_id.toLowerCase() === id;
+  return typeof claims.org_slug === "string" && claims.org_slug === ref.toLowerCase();
 }
 
 /** Whether two paths are the same page, whatever a server does with a trailing slash. */
@@ -450,7 +517,7 @@ export class EAuth {
     return this.start(options, 0);
   }
 
-  private async start(options: SignInOptions, tries: number): Promise<void> {
+  private async start(options: SignInOptions, tries: number, resume = false): Promise<void> {
     browserOnly("signIn");
     this.refuseLoop();
     const meta = await this.discover();
@@ -460,6 +527,8 @@ export class EAuth {
     const state = randomString(16);
     const nonce = randomString(16);
     const silent = options.prompt === "none";
+    // An empty organisation asks for none, as it does at EAuth.
+    const org = options.organization?.trim() || undefined;
 
     // The verifier has to survive a full-page navigation, so it cannot live
     // in memory. sessionStorage is the right scope: it dies with the tab,
@@ -472,6 +541,8 @@ export class EAuth {
       tries: silent ? tries : undefined,
       maxAge: options.maxAge,
       login: options.prompt === "login",
+      org,
+      resume: resume || undefined,
     };
     if (!storageSet("session", PENDING_KEY, JSON.stringify(pending))) {
       // The answer could never be matched to this request, so every sign-in
@@ -494,6 +565,7 @@ export class EAuth {
     if (options.prompt) url.searchParams.set("prompt", options.prompt);
     if (options.loginHint) url.searchParams.set("login_hint", options.loginHint);
     if (options.maxAge !== undefined) url.searchParams.set("max_age", String(options.maxAge));
+    if (org) url.searchParams.set("organization", org);
 
     if (silent || options.replace) location.replace(url.toString());
     else location.assign(url.toString());
@@ -561,10 +633,13 @@ export class EAuth {
         throw new EAuthError(`The answer came from ${iss}, expected ${this.config.issuer}.`, "issuer_mismatch");
       }
       if (error) {
-        if (pending.silent && NOBODY.includes(error)) {
-          // A silent sign-in that found nobody is not a failure.
+        // A silent sign-in that found nobody is not a failure. Nor is a
+        // reload that cannot continue in the tab's organisation any more:
+        // the tab is signed out, and signing in again chooses anew.
+        if (pending.silent && (NOBODY.includes(error) || (pending.resume && pending.org && error === "access_denied"))) {
           storageSet("local", HINT_KEY, null);
           storageSet("session", FAILURES_KEY, null);
+          storageSet("session", ORG_KEY, null);
           return { user: null, returnTo };
         }
         throw new EAuthError(params.get("error_description") ?? "The sign-in was refused.", error);
@@ -587,6 +662,7 @@ export class EAuth {
         nonce: pending.nonce,
         maxAge: pending.maxAge,
         authAfter: pending.login ? pending.at : undefined,
+        org: pending.org,
       });
       if (epoch !== this.epoch) {
         // Signed out while the exchange was under way.
@@ -655,7 +731,10 @@ export class EAuth {
           "redirect_mismatch",
         );
       }
-      await this.start({ prompt: "none", returnTo: this.here() }, tries);
+      // In the organisation this tab was in. Without it, EAuth would take
+      // the one used last, perhaps in another tab.
+      const organization = storageGet("session", ORG_KEY) ?? undefined;
+      await this.start({ prompt: "none", returnTo: this.here(), organization }, tries, true);
       return new Promise<never>(() => {});
     }
     return null;
@@ -846,6 +925,12 @@ export class EAuth {
     if (expect.sub !== undefined && claims.sub !== expect.sub) {
       throw new EAuthError("The refreshed ID token names somebody else.", "subject_mismatch");
     }
+    if (expect.org !== undefined && !isOrganisation(claims, expect.org)) {
+      throw new EAuthError(`The ID token is not for the organisation ${expect.org}.`, "organization_mismatch");
+    }
+    if (expect.orgId !== undefined && (typeof claims.org_id === "string" ? claims.org_id : null) !== expect.orgId) {
+      throw new EAuthError("The refreshed ID token is for another organisation.", "organization_mismatch");
+    }
     if (expect.maxAge !== undefined || expect.authAfter !== undefined) {
       const authTime = claims.auth_time;
       if (typeof authTime !== "number") {
@@ -907,6 +992,13 @@ export class EAuth {
         // session's to present, and this session is over.
         this.signOutLocal(this.tokens.refreshToken ?? "");
         throw new EAuthError("Signed in as somebody else in another tab.", "not_authenticated");
+      } else if (this.user && stored.org !== undefined && stored.org !== (this.user.organization?.id ?? null)) {
+        // Another tab signed in to another organisation, and the origin
+        // keeps one refresh token. Presenting it here would switch this tab
+        // to that organisation, and refusing the answer would sign the
+        // other tab out; this tab's session ends instead.
+        this.signOutLocal(this.tokens.refreshToken ?? "");
+        throw new EAuthError("Signed in to another organisation in another tab.", "not_authenticated");
       } else {
         // Possibly rotated by another tab since this one last renewed.
         this.tokens.refreshToken = stored.token;
@@ -955,7 +1047,11 @@ export class EAuth {
     if (tokens.idToken) {
       try {
         claims = decodeClaims(tokens.idToken);
-        this.checkIDToken(claims, meta, { sub: this.user?.sub });
+        this.checkIDToken(claims, meta, {
+          sub: this.user?.sub,
+          // A refresh continues in the organisation the session is in.
+          orgId: this.user ? (this.user.organization?.id ?? null) : undefined,
+        });
       } catch (err) {
         // Not an answer for this session. The new token goes back, and the
         // session ends here.
@@ -1017,9 +1113,11 @@ export class EAuth {
     const remaining = Math.max(0, tokens.expiresAt - Date.now());
     this.renewAt = tokens.expiresAt - Math.min(REFRESH_MARGIN_MS, remaining / 2);
     if (claims) this.user = toUser(claims);
+    const org = this.user?.organization?.id ?? null;
     if (this.config.storage === "local" && tokens.refreshToken) {
-      this.persisted = storageSet("local", REFRESH_KEY, JSON.stringify({ token: tokens.refreshToken, sub: this.user?.sub }));
+      this.persisted = storageSet("local", REFRESH_KEY, JSON.stringify({ token: tokens.refreshToken, sub: this.user?.sub, org }));
     }
+    storageSet("session", ORG_KEY, org);
     storageSet("local", HINT_KEY, "1");
     this.scheduleExpiry();
     this.config.onChange?.(this.user);
@@ -1076,6 +1174,7 @@ export class EAuth {
     this.persisted = false;
     storageSet("local", HINT_KEY, null);
     storageSet("session", PENDING_KEY, null);
+    storageSet("session", ORG_KEY, null);
     if (had) this.config.onChange?.(null);
   }
 
@@ -1118,8 +1217,22 @@ function toUser(claims: Record<string, unknown>): EAuthUser {
     name: typeof claims.name === "string" ? claims.name : undefined,
     email: typeof claims.email === "string" ? claims.email : undefined,
     emailVerified: typeof claims.email_verified === "boolean" ? claims.email_verified : undefined,
-    orgId: typeof claims.org_id === "string" ? claims.org_id : undefined,
+    organization: toOrganization(claims),
     claims,
+  };
+}
+
+function toOrganization(claims: Record<string, unknown>): EAuthOrganization | undefined {
+  if (typeof claims.org_id !== "string" || claims.org_id === "") return undefined;
+  const text = (v: unknown): string => (typeof v === "string" ? v : "");
+  return {
+    id: claims.org_id,
+    slug: text(claims.org_slug),
+    name: text(claims.org_name),
+    role: text(claims.org_role),
+    permissions: Array.isArray(claims.org_permissions)
+      ? claims.org_permissions.filter((p): p is string => typeof p === "string")
+      : [],
   };
 }
 

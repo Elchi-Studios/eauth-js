@@ -38,6 +38,12 @@ The first release.
 - `signOut` revokes the refresh token, and with `endSession` signs out at
   EAuth too.
 - `fetch` and `getAccessToken` for calling your own API.
+- Organisations: `signIn` takes `organization` by ID or slug, the user
+  carries `organization` (`id`, `slug`, `name`, `role`, `permissions`), an
+  answer for another organisation than the one named is refused, and a
+  renewal that changes the organisation ends the session. A reload
+  continues in the tab's own organisation, and with `storage: "local"` a
+  tab never presents the refresh token of another organisation.
 
 ### @elchi-studios/eauth-react
 

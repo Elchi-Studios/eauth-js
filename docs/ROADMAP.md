@@ -6,8 +6,6 @@ Rough order. Nothing here is a promise with a date.
 
 - Signing out in one tab signs out the others, through a
   `BroadcastChannel`.
-- Choosing the organisation at sign-in, once organisations are live in
-  EAuth.
 - A small package for servers that checks EAuth access tokens against
   the published keys, for Node and the edge runtimes.
 

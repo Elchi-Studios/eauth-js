@@ -18,6 +18,7 @@ import {
   EAuth,
   EAuthError,
   type EAuthConfig,
+  type EAuthOrganization,
   type EAuthUser,
   type ReadyResult,
   type SignInOptions,
@@ -25,7 +26,7 @@ import {
 } from "@elchi-studios/eauth";
 
 export { EAuth, EAuthError };
-export type { EAuthConfig, EAuthUser, ReadyResult, SignInOptions, SignOutOptions };
+export type { EAuthConfig, EAuthOrganization, EAuthUser, ReadyResult, SignInOptions, SignOutOptions };
 
 export interface AuthState {
   /** The signed-in user, or null. */

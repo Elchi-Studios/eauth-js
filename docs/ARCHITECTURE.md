@@ -52,9 +52,12 @@ always sends it (RFC 9207). A silent attempt that EAuth answers with
 `login_required` or one of its siblings resolves with nobody signed in;
 any other failure of a silent attempt clears the hint, so it is not
 repeated. When the person declined, `returnTo` is the page the sign-in
-started from rather than the page that needed it. Otherwise the code is exchanged with the verifier, and the ID
-token's `iss`, `aud`, `azp`, `sub`, `exp` and `nonce` are checked, with
-`auth_time` against `maxAge` and `prompt=login`.
+started from rather than the page that needed it. Otherwise the code is
+exchanged with the verifier, and the ID token's `iss`, `aud`, `azp`,
+`sub`, `exp` and `nonce` are checked, with `auth_time` against `maxAge`
+and `prompt=login`, and the organisation against the one named at sign-in:
+an ID in any form EAuth reads, compared with `org_id`, or a slug, compared
+with `org_slug`, both without regard to case.
 
 Everything that handled an answer returns `returnTo`: the path the sign-in
 started from, or the current path without the answer. Errors carry it too.
@@ -62,30 +65,34 @@ Routers read the address when they start, and are told this way.
 
 **Restore.** With memory storage, `restore()` looks for the flag
 `eauth:signed-in` in `localStorage`. With the flag, it signs in again with
-`prompt=none`. When the previous silent attempt is still pending, it never
-came back to the redirect URI: a reload may have interrupted it, so it is
-tried once more, and after that restore stops with `redirect_mismatch`.
-Paths kept to return to lose a spent answer when they are on the redirect
-URI, where a router may have written it back; anywhere else the query
-belongs to the application and stays whole. With `storage: "local"` the refresh token is in
-`localStorage` and restore is a refresh.
+`prompt=none`, and with the organisation the tab was in, kept by ID in
+`sessionStorage` as `eauth:organization`; `access_denied` for it then
+means signed out, like `login_required`. When the previous silent attempt
+is still pending, it never came back to the redirect URI: a reload may
+have interrupted it, so it is tried once more, and after that restore
+stops with `redirect_mismatch`. Paths kept to return to lose a spent
+answer when they are on the redirect URI, where a router may have written
+it back; anywhere else the query belongs to the application and stays
+whole. With `storage: "local"` the refresh token is in `localStorage` and
+restore is a refresh.
 
 **Refresh.** `getAccessToken()` renews the token a minute before it
 expires, or halfway through a shorter lifetime. It starts `ready()` if
 nothing has yet, since a React child's effect runs before its provider's,
-and waits for it. Callers share one refresh
-promise. With `storage: "local"` the refresh runs under a Web Lock per
-client ID and first re-reads the stored token, so the tabs of an origin
-take turns and each presents the newest token. The stored token carries
-the `sub` it belongs to, and a tab whose person differs signs itself out
-instead of presenting it. When storage no longer holds the presented token
-once the answer arrives, another tab signed out or in meanwhile: the new
-token is revoked and this tab's session ends. Token requests give up after
-30 seconds, so a hung one cannot hold the lock. Only `invalid_grant` and
-its siblings end the session; a network failure or a 5xx keeps it. A
-renewed ID token must name the same `sub`. A counter of sign-outs, the
-epoch, lets a refresh that finishes after a sign-out hand its new token
-back to EAuth instead of bringing the session back.
+and waits for it. Callers share one refresh promise. With
+`storage: "local"` the refresh runs under a Web Lock per client ID and
+first re-reads the stored token, so the tabs of an origin take turns and
+each presents the newest token. The stored token carries the `sub` and the
+organisation's ID it belongs to, and a tab whose person or organisation
+differs signs itself out instead of presenting it. When storage no longer
+holds the presented token once the answer arrives, another tab signed out
+or in meanwhile: the new token is revoked and this tab's session ends.
+Token requests give up after 30 seconds, so a hung one cannot hold the
+lock. Only `invalid_grant` and its siblings end the session; a network
+failure or a 5xx keeps it. A renewed ID token must name the same `sub` and
+the same organisation. A counter of sign-outs, the epoch, lets a refresh
+that finishes after a sign-out hand its new token back to EAuth instead of
+bringing the session back.
 
 **Expiry.** Without a refresh token the session ends with the access
 token: a timer, and a check whenever the user is read, clear it and call
