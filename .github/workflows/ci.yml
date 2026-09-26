@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run check
+
+  previous:
+    # The packages promise React 18, Svelte 4 and Nuxt 3 as well; the
+    # development setup uses the current majors, so this job swaps them.
+    name: React 18, Svelte 4, Nuxt 3
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use the previous majors
+        run: |
+          npm pkg set -w packages/react devDependencies.react=^18.3.1 devDependencies.react-dom=^18.3.1 "devDependencies.@types/react=^18.3.0" "devDependencies.@types/react-dom=^18.3.0"
+          npm pkg set -w packages/sveltekit devDependencies.svelte=^4.2.0
+          npm pkg set -w packages/nuxt devDependencies.nuxt=^3.13.0
+          npm install
+          npm ls react svelte nuxt
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test

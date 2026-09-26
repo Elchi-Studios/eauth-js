@@ -1,0 +1,72 @@
+name: Release
+
+# Push a tag like v1.1.0 after setting that version with
+# scripts/version.mjs. Everything is checked again before anything is
+# published.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write # the GitHub release
+      id-token: write # trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          # No cache when publishing: a poisoned cache would run with the
+          # publishing credentials.
+          package-manager-cache: false
+
+      - name: The tag matches the version
+        run: |
+          version=$(node -p "require('./packages/eauth/package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME, the packages are at $version."
+            exit 1
+          fi
+          if ! grep -q "^## $version\$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run check
+
+      - name: Publish to npm
+        # Trusted publishing when it is configured for the packages on npm;
+        # the NPM_TOKEN secret otherwise, which the very first release needs
+        # because npm only offers trusted publishing for existing packages.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in $(node -p "require('./package.json').workspaces.join(' ')"); do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm."
+              continue
+            fi
+            npm publish -w "$dir"
+          done
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v heading="## $version" '$0 == heading { found = 1; next } /^## / { found = 0 } found' CHANGELOG.md > notes.md
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
