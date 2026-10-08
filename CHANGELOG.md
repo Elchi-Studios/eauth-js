@@ -4,6 +4,25 @@ Every package in this repository is released with the same version. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### @elchi-studios/eauth
+
+- A code from EAuth that answers a sign-in another tab started is followed
+  by one silent sign-in, so a person who registers in one tab and confirms
+  their address from the mail in another is signed in there, not left
+  signed out. Only with `silentRestore`, and never for an error. Not
+  after `signOut()` either, until a sign-in is started again in this
+  browser: EAuth may still hold the session, and an old code, from a mail
+  link clicked again or the history, would sign the person back in. With
+  `storage: "local"` none of this applies: `restore()` continues from the
+  stored refresh token, or not at all.
+- A request the browser does not let through says that it may be the
+  browser keeping the answer from the page, not only that EAuth could not
+  be reached, and for the token endpoint which origins it answers.
+- The browser tests run against a stand-in that answers CORS as EAuth
+  does, so a request EAuth would not let a page read fails here too.
+
 ## 1.0.0
 
 The first release.

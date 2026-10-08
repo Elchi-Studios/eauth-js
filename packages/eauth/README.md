@@ -172,6 +172,14 @@ forged one) is removed from the address and ignored, and the page carries
 on as if it had not been there. Only the redirect URI is looked at, so a
 `code` parameter of your own on another page is left alone.
 
+Nothing in such an answer is redeemed, but a code from EAuth says that the
+browser was signed in there a moment ago, as when somebody registers in one
+tab and confirms their address from the mail in another. With
+`silentRestore`, `restore()` then tries one silent sign-in, which completes
+it in this tab. It does not after `signOut()`, until a sign-in is started
+again in this browser, so an old code cannot sign the person back in. With
+`storage: "local"` there is no silent sign-in at all.
+
 ## Configuration
 
 | Option | Default | |

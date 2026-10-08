@@ -147,9 +147,11 @@ test("handleRedirect is harmless without an answer, and elsewhere than the redir
 test("an answer that was not started in this tab is removed and ignored", async () => {
   {
     // A reload of an answer already spent, or a link opened in another tab.
+    // (With silentRestore, the default for memory storage, a silent sign-in
+    // follows; see the next test.)
     const b = browser();
     b.open(`${APP}/callback?code=abc&state=xyz&iss=${encodeURIComponent(ISSUER)}`);
-    const auth = new EAuth(config);
+    const auth = new EAuth({ ...config, silentRestore: false });
     const result = await auth.ready();
     assert.deepEqual(result, { user: null, returnTo: "/callback" });
     assert.equal(location.search, "");
@@ -175,6 +177,63 @@ test("an answer that was not started in this tab is removed and ignored", async 
     b.open(`${location.href}&error_description=${encodeURIComponent("Account locked. Call +1 555 0100.")}`);
     assert.equal(await auth.handleRedirect(), null);
   }
+});
+
+test("an answer for another tab's sign-in is followed by one silent sign-in", async () => {
+  // Somebody registers in one tab and confirms their address from the mail
+  // in a new one. EAuth signs them in there and sends the code to this
+  // page, which did not start the sign-in. EAuth holds a session now, so a
+  // silent sign-in completes it here.
+  const b = browser();
+  b.open(`${APP}/callback?code=abc&state=xyz&iss=${encodeURIComponent(ISSUER)}`);
+  const auth = new EAuth(config);
+  let settled = false;
+  void auth.ready().then(() => (settled = true));
+  await tick(20);
+  assert.equal(settled, false, "ready waits for the navigation");
+  const url = b.navigations.at(-1)!;
+  assert.equal(url.searchParams.get("prompt"), "none");
+  assert.equal(grants(b, "authorization_code").length, 0);
+
+  b.answer({ code: issueCode(b) });
+  const back = new EAuth(config);
+  const result = await back.ready();
+  assert.equal(result.user?.sub !== undefined, true);
+
+  // Only for a code from this issuer: an error, or another server's answer,
+  // starts nothing.
+  for (const answer of [`error=access_denied&state=xyz&iss=${encodeURIComponent(ISSUER)}`,
+    `code=abc&state=xyz&iss=${encodeURIComponent("https://elsewhere.example")}`]) {
+    const c = browser();
+    c.open(`${APP}/callback?${answer}`);
+    const before = c.navigations.length;
+    assert.deepEqual(await new EAuth(config).ready(), { user: null, returnTo: "/callback" });
+    assert.equal(c.navigations.length, before);
+  }
+});
+
+test("after signOut, an answer for another tab's sign-in starts nothing until a sign-in starts", async () => {
+  // EAuth still holds the session after a sign-out here. An old code, from
+  // a mail link clicked again or the history, must not sign the person
+  // back in through a silent sign-in.
+  const { b, auth } = await signedIn();
+  await auth.signOut();
+  const stale = `${APP}/callback?code=abc&state=xyz&iss=${encodeURIComponent(ISSUER)}`;
+  b.open(stale);
+  const before = b.navigations.length;
+  let result: unknown;
+  void new EAuth(config).ready().then((r) => (result = r));
+  await tick(20);
+  assert.equal(b.navigations.length, before, "no silent sign-in");
+  assert.deepEqual(result, { user: null, returnTo: "/callback" });
+
+  // Once the person starts a sign-in again, in any tab, such a code is
+  // followed again: the registration that ends in a new tab.
+  await new EAuth(config).signIn();
+  b.open(stale);
+  void new EAuth(config).ready();
+  await tick(20);
+  assert.equal(b.navigations.at(-1)!.searchParams.get("prompt"), "none");
 });
 
 test("the issuer, nonce, audience, subject and expiry of the answer are checked", async () => {

@@ -230,6 +230,12 @@ const PENDING_KEY = "eauth:pending";
 const REFRESH_KEY = "eauth:refresh";
 /** Only a flag, never a token: this browser was signed in before. */
 const HINT_KEY = "eauth:signed-in";
+/**
+ * Only a flag: the person signed out with signOut() and has not started a
+ * sign-in since. EAuth may still hold their session, so a code that answers
+ * another tab's sign-in is not followed by a silent one meanwhile.
+ */
+const SIGNED_OUT_KEY = "eauth:signed-out";
 /** When the last sign-ins in this tab failed, to stop a redirect loop. */
 const FAILURES_KEY = "eauth:failures";
 /**
@@ -419,6 +425,8 @@ export class EAuth {
   private epoch = 0;
   /** The path after an answer that was not for this tab was removed from the address. */
   private cleaned?: string;
+  /** handleRedirect removed a code this tab did not ask for; see there. */
+  private foreignCode = false;
   private expiry?: ReturnType<typeof setTimeout>;
   /** With storage "local": whether the refresh token held here is also in storage. */
   private persisted = false;
@@ -527,6 +535,9 @@ export class EAuth {
     const state = randomString(16);
     const nonce = randomString(16);
     const silent = options.prompt === "none";
+    // The person asks to sign in, so a code from it may be followed in
+    // another tab again (see handleRedirect).
+    if (!silent) storageSet("local", SIGNED_OUT_KEY, null);
     // An empty organisation asks for none, as it does at EAuth.
     const org = options.organization?.trim() || undefined;
 
@@ -616,6 +627,20 @@ export class EAuth {
       // text; it only leaves the address.
       this.cleanAddress();
       this.cleaned = currentPath();
+      // A code from our issuer says the browser was signed in there a
+      // moment ago, by a sign-in another tab started: a person who
+      // registered in one tab and confirmed their address from the mail in
+      // a new one lands here. restore() then tries one silent sign-in,
+      // which completes it in this tab. Not after the person signed out
+      // and before they started a sign-in again: EAuth may still hold the
+      // session, and an old code, from a mail link clicked again or the
+      // history, would sign them back in.
+      const iss = params.get("iss");
+      this.foreignCode =
+        code !== null &&
+        error === null &&
+        (iss === null || iss === this.config.issuer) &&
+        storageGet("local", SIGNED_OUT_KEY) === null;
       return null;
     }
 
@@ -715,7 +740,7 @@ export class EAuth {
       return this.user;
     }
 
-    if (this.config.silentRestore && storageGet("local", HINT_KEY) === "1") {
+    if (this.config.silentRestore && (storageGet("local", HINT_KEY) === "1" || this.foreignCode)) {
       // A silent attempt still pending never came back with its answer:
       // interrupted by a reload once, or lost to a redirect in front of the
       // application every time. The first gets one more try; after that,
@@ -750,6 +775,7 @@ export class EAuth {
     const stored = this.config.storage === "local" ? readStored()?.token : undefined;
     const idToken = this.tokens?.idToken;
     this.signOutLocal();
+    storageSet("local", SIGNED_OUT_KEY, "1");
 
     if (!options.local) {
       // Another tab may have rotated the stored token past the one held here.
@@ -880,7 +906,13 @@ export class EAuth {
     try {
       response = await fetch(`${this.config.issuer}/.well-known/openid-configuration`, { signal: this.timeout() });
     } catch (err) {
-      throw new EAuthError("EAuth could not be reached.", "discovery_failed", err);
+      // fetch says no more than that it failed: the network, or the browser
+      // refusing to let this page read the answer (CORS) look the same here.
+      throw new EAuthError(
+        `EAuth could not be reached at ${this.config.issuer}, or the browser kept its answer from this page. Check the issuer.`,
+        "discovery_failed",
+        err,
+      );
     }
     if (!response.ok) {
       throw new EAuthError(`Discovery answered ${response.status}. Check the issuer.`, "discovery_failed");
@@ -1086,7 +1118,14 @@ export class EAuth {
         signal: this.timeout(),
       });
     } catch (err) {
-      throw new EAuthError("EAuth could not be reached.", code, err);
+      // The token endpoint lets a page read its answer only on the origin of
+      // one of the application's redirect URIs; elsewhere the browser hides
+      // it, and fetch reports that as a network failure.
+      throw new EAuthError(
+        `EAuth could not be reached, or the browser kept its answer from this page: the token endpoint answers a page only on the origin of one of the application's redirect URIs, and ${typeof location === "undefined" ? "this page's origin" : location.origin} may not be one.`,
+        code,
+        err,
+      );
     }
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {

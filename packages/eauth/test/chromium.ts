@@ -47,12 +47,31 @@ export async function eauth(context: BrowserContext): Promise<Stand> {
     return route.abort("blockedbyclient");
   });
   let session = false;
-  const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type" };
+
+  // CORS as EAuth answers it, no wider, so a test passes only where the
+  // real server lets the browser read the answer: discovery, the keys and
+  // userinfo for any page; the token endpoint and revocation only for a
+  // page on the origin of a redirect URI the client uses; credentials never.
+  const preflight = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST",
+    "access-control-allow-headers": "Authorization, Content-Type",
+  };
+  const cors = (url: URL, origin: string | undefined): Record<string, string> => {
+    if (url.pathname.startsWith("/.well-known/") || url.pathname === "/userinfo") {
+      return { "access-control-allow-origin": "*" };
+    }
+    const registered = stand.authorizations.map((a) => new URL(a.searchParams.get("redirect_uri")!).origin);
+    if ((url.pathname === "/token" || url.pathname === "/revoke") && origin && registered.includes(origin)) {
+      return { "access-control-allow-origin": origin, vary: "Origin" };
+    }
+    return {};
+  };
 
   await context.route(`${ISSUER}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: preflight });
 
     if (url.pathname === "/authorize") {
       stand.authorizations.push(url);
@@ -91,7 +110,10 @@ export async function eauth(context: BrowserContext): Promise<Stand> {
     }
     return route.fulfill({
       status: response.status,
-      headers: { ...cors, "content-type": response.headers.get("content-type") ?? "text/plain" },
+      headers: {
+        ...cors(url, request.headers()["origin"]),
+        "content-type": response.headers.get("content-type") ?? "text/plain",
+      },
       body: await response.text(),
     });
   });
